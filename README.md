@@ -185,7 +185,7 @@ _More will be coming soon..._
 - **User List Cover** - Get CSS file for anime or manga list cover. Please go [here](https://github.com/rl404/MAL-Scraper/wiki/getUserCover()) for more info. And don't forget to convert your style to url using [this](https://www.url-encode-decode.com/).
   - `/user-cover?u=rl404`
   - `/usercover?u=rl404&t=manga`
-  - `/usercover?u=rl404&q=%23more%7Bid%7D+.borderRBL+div%7Bbackground-image%3Aurl%28%7Burl%7D%29%7D`
+  - `/usercover?u=rl404&q=%23more%7Banime_id%7D+.borderRBL+div%7Bbackground-image%3Aanime_image_path%28%7Burl%7D%29%7D`
 
 For more information about the methods, params, and output, you can read the [code](https://github.com/rl404/MAL-Scraper-API/blob/master/index.php) by yourself (it should be easy to read and understand) or you can go to the [wiki](https://github.com/rl404/MAL-Scraper/wiki) library.
 
