@@ -190,7 +190,7 @@ _More will be coming soon..._
 For more information about the methods, params, and output, you can read the [code](https://github.com/rl404/MAL-Scraper-API/blob/master/index.php) by yourself (it should be easy to read and understand) or you can go to the [wiki](https://github.com/rl404/MAL-Scraper/wiki) library.
 
 ## Try it yourself
-If you want to try, use `mal-scraper.000webhostapp.com` or `mal-scraper.epizy.com/api` as the domain.
+If you want to try, use `https://shaggyze.website/msa` as the domain.
 
 ## Disclamer
 All data (including anime, manga, people, etc) and MyAnimeList logos belong to their respective copyrights owners. Mal-Scraper does not have any affliation with content providers.
