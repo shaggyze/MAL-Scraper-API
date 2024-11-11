@@ -4,7 +4,7 @@
 
 > Easy setup, Easy use, Easy life
 
-_Mal-Scraper-API_ is a very easy and simple REST API setup to get [MyAnimeList.net](https://myanimelist.net/) data by using my [Mal-Scraper](https://github.com/rl404/MAL-Scraper/) as data parser.
+_Mal-Scraper-API_ is a very easy and simple REST API setup to get [MyAnimeList.net](https://myanimelist.net/) data by using rl404's [Mal-Scraper](https://github.com/shaggyze/MAL-Scraper/) as data parser.
 
 ### Features
 - Get general information of anime, manga, charater (from anime and manga), or people (voice actor, author, staff, etc)
