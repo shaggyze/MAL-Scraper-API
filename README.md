@@ -195,7 +195,7 @@ _More will be coming soon..._
 - **sz** - Change size of images `small`. `medium`, and `large`.
   - `&sz=medium`
 
-For more information about the methods, params, and output, you can read the [code](https://github.com/rl404/MAL-Scraper-API/blob/master/index.php) by yourself (it should be easy to read and understand) or you can go to the [wiki](https://github.com/rl404/MAL-Scraper/wiki) library.
+For more information about the methods, params, and output, you can read the [code](https://github.com/shaggyze/MAL-Scraper-API/blob/master/index.php) by yourself (it should be easy to read and understand) or you can go to the [wiki](https://github.com/rl404/MAL-Scraper/wiki) library.
 
 ## Try it yourself
 If you want to try, use `https://shaggyze.website/msa` as the domain.
