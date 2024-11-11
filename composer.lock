@@ -4,46 +4,8 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "98bdab071942aad74af111d1d864628b",
+    "content-hash": "9d118e28a9c464d1cafaa550494e2534",
     "packages": [
-        {
-            "name": "rl404/mal-scraper",
-            "version": "v1.5.3",
-            "source": {
-                "type": "git",
-                "url": "https://github.com/rl404/MAL-Scraper.git",
-                "reference": "3e378a60dfaaef94949bccce4ff06f9399869bee"
-            },
-            "dist": {
-                "type": "zip",
-                "url": "https://api.github.com/repos/rl404/MAL-Scraper/zipball/3e378a60dfaaef94949bccce4ff06f9399869bee",
-                "reference": "3e378a60dfaaef94949bccce4ff06f9399869bee",
-                "shasum": ""
-            },
-            "require": {
-                "php": ">=5.4",
-                "rl404/php-simple-html-dom-parser": "~1.5.0",
-                "rl404/simple-php-cache": "~1.6.1"
-            },
-            "type": "library",
-            "autoload": {
-                "psr-0": {
-                    "MalScraper": "src/"
-                }
-            },
-            "notification-url": "https://packagist.org/downloads/",
-            "license": [
-                "MIT"
-            ],
-            "authors": [
-                {
-                    "name": "Axel Oktavian Antonio",
-                    "email": "axel.rl.404@gmail.com"
-                }
-            ],
-            "description": "Unofficial MyAnimeList API that scrap and parse everything from MyAnimeList web into array and json",
-            "time": "2019-04-21T08:35:55+00:00"
-        },
         {
             "name": "rl404/php-simple-html-dom-parser",
             "version": "v1.5.4",
@@ -94,6 +56,9 @@
                 "html",
                 "parser"
             ],
+            "support": {
+                "source": "https://github.com/rl404/php-simple-html-dom-parser/tree/v1.5.4"
+            },
             "time": "2019-04-21T08:49:09+00:00"
         },
         {
@@ -143,15 +108,62 @@
                 "filesystem",
                 "json"
             ],
+            "support": {
+                "source": "https://github.com/rl404/Simple-PHP-Cache/tree/v1.6.1"
+            },
             "time": "2018-11-09T06:22:41+00:00"
+        },
+        {
+            "name": "shaggyze/mal-scraper",
+            "version": "dev-master",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/shaggyze/MAL-Scraper.git",
+                "reference": "25f3b51d4f341e4c754ef05241030d69e620e8b0"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/shaggyze/MAL-Scraper/zipball/25f3b51d4f341e4c754ef05241030d69e620e8b0",
+                "reference": "25f3b51d4f341e4c754ef05241030d69e620e8b0",
+                "shasum": ""
+            },
+            "require": {
+                "php": ">=5.4",
+                "rl404/php-simple-html-dom-parser": "~1.5.0",
+                "rl404/simple-php-cache": "~1.6.1"
+            },
+            "default-branch": true,
+            "type": "library",
+            "autoload": {
+                "psr-0": {
+                    "MalScraper": "src/"
+                }
+            },
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "ShaggyZE",
+                    "email": "shaggyze@gmail.com"
+                }
+            ],
+            "description": "Unofficial MyAnimeList API that scrap and parse everything from MyAnimeList web into array and json",
+            "support": {
+                "source": "https://github.com/shaggyze/MAL-Scraper/tree/master"
+            },
+            "time": "2024-07-07T07:30:48+00:00"
         }
     ],
     "packages-dev": [],
     "aliases": [],
     "minimum-stability": "dev",
-    "stability-flags": [],
+    "stability-flags": {
+        "shaggyze/mal-scraper": 20
+    },
     "prefer-stable": false,
     "prefer-lowest": false,
     "platform": [],
-    "platform-dev": []
+    "platform-dev": [],
+    "plugin-api-version": "2.6.0"
 }
