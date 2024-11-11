@@ -187,6 +187,14 @@ _More will be coming soon..._
   - `/usercover?u=rl404&t=manga`
   - `/usercover?u=rl404&q=%23more%7Banime_id%7D+.borderRBL+div%7Bbackground-image%3Aurl%28%7Banime_image_path%7D%29%7D`
 
+### Additional Parameters
+- **st** - Change list by status.
+  - `&st=7`
+- **g** - Change list by genre.
+  - `&g=12`
+- **sz** - Change size of images `small`. `medium`, and `large`.
+  - `&sz=medium`
+
 For more information about the methods, params, and output, you can read the [code](https://github.com/rl404/MAL-Scraper-API/blob/master/index.php) by yourself (it should be easy to read and understand) or you can go to the [wiki](https://github.com/rl404/MAL-Scraper/wiki) library.
 
 ## Try it yourself
