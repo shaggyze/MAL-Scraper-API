@@ -192,7 +192,7 @@ _More will be coming soon..._
   - `&st=7`
 - **g** - Change list by genre.
   - `&g=12`
-- **sz** - Change size of images `small`. `medium`, and `large`.
+- **sz** - Change size of images `small`, `medium`, and `large`.
   - `&sz=medium`
 
 For more information about the methods, params, and output, you can read the [code](https://github.com/shaggyze/MAL-Scraper-API/blob/master/index.php) by yourself (it should be easy to read and understand) or you can go to the [wiki](https://github.com/rl404/MAL-Scraper/wiki) library.
