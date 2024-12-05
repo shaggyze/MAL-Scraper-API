@@ -170,8 +170,8 @@ _More will be coming soon..._
 - **User** - Get user profile information
   - `/user?u=rl404`
 - **User Friends** - Get list of user's friends.
-  - `/user-friend?u=r404`
-  - `/userfriend?u=rl404`
+  - `/user-friend?u=r404&p=1`
+  - `/userfriend?u=rl404&p=1`
 - **User History** - Get list of user's anime or manga update history.
   - `/user-history?u=rl404`
   - `/userhistory?u=rl404&t=anime`
