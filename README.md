@@ -4,7 +4,7 @@
 
 > Easy setup, Easy use, Easy life
 
-_Mal-Scraper-API_ is a very easy and simple REST API setup to get [MyAnimeList.net](https://myanimelist.net/) data by using my [Mal-Scraper](https://github.com/rl404/MAL-Scraper/) as data parser.
+_Mal-Scraper-API_ is a very easy and simple REST API setup to get [MyAnimeList.net](https://myanimelist.net/) data by using rl404's [Mal-Scraper](https://github.com/shaggyze/MAL-Scraper/) as data parser.
 
 ### Features
 - Get general information of anime, manga, charater (from anime and manga), or people (voice actor, author, staff, etc)
@@ -185,12 +185,20 @@ _More will be coming soon..._
 - **User List Cover** - Get CSS file for anime or manga list cover. Please go [here](https://github.com/rl404/MAL-Scraper/wiki/getUserCover()) for more info. And don't forget to convert your style to url using [this](https://www.url-encode-decode.com/).
   - `/user-cover?u=rl404`
   - `/usercover?u=rl404&t=manga`
-  - `/usercover?u=rl404&q=%23more%7Bid%7D+.borderRBL+div%7Bbackground-image%3Aurl%28%7Burl%7D%29%7D`
+  - `/usercover?u=rl404&q=%23more%7Banime_id%7D+.borderRBL+div%7Bbackground-image%3Aurl%28%7Banime_image_path%7D%29%7D`
 
-For more information about the methods, params, and output, you can read the [code](https://github.com/rl404/MAL-Scraper-API/blob/master/index.php) by yourself (it should be easy to read and understand) or you can go to the [wiki](https://github.com/rl404/MAL-Scraper/wiki) library.
+### Additional Parameters
+- **st** - Change list by status.
+  - `&st=7`
+- **g** - Change list by genre.
+  - `&g=12`
+- **sz** - Change size of images `small`, `medium`, and `large`.
+  - `&sz=medium`
+
+For more information about the methods, params, and output, you can read the [code](https://github.com/shaggyze/MAL-Scraper-API/blob/master/index.php) by yourself (it should be easy to read and understand) or you can go to the [wiki](https://github.com/rl404/MAL-Scraper/wiki) library.
 
 ## Try it yourself
-If you want to try, use `mal-scraper.000webhostapp.com` or `mal-scraper.epizy.com/api` as the domain.
+If you want to try, use `https://shaggyze.website/msa` as the domain.
 
 ## Disclamer
 All data (including anime, manga, people, etc) and MyAnimeList logos belong to their respective copyrights owners. Mal-Scraper does not have any affliation with content providers.

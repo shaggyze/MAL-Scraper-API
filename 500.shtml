@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>500 Internal Server Error</title>
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="60">
+<style>@media (prefers-color-scheme:dark){body{background-color:#000!important}}</style>
+<style>
+body {
+  background-image: url('error_404.png');
+  background-repeat: no-repeat;
+  background-attachment: fixed; 
+  background-size: 100% 100%;
+
+  color: #03A062;
+  font-size: 20px;
+}
+</style>
+</head>
+<body style="background-image: url('https://shaggyze.website/')">
+<h2>Request Timeout</h2>
+<p>This request takes too long to process, it is timed out by the server. If it should not be timed out contact Adminstrator or try again later..
+</p>
+<p><center><!--#echo var="REMOTE_ADDR" -->(<!--#echo var="HTTP_REFERER" -->) is using <!--#echo var="HTTP_USER_AGENT" --> and has requested http:// <!--#echo var="HTTP_HOST" --><!--#echo var="REQUEST_URI" --> <!--#echo var="REDIRECT_STATUS" --></center></p>
+</body>
+</html>
