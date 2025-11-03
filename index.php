@@ -14,8 +14,8 @@ header("Access-Control-Allow-Credentials: true");
 // Return json file
 header('Content-type:application/json;charset=utf-8');
 
-ini_set('max_execution_time', 2000);
-ini_set('memory_limit', "1024M");
+ini_set('max_execution_time', 20000);
+ini_set('memory_limit', "2048M");
 ini_set('max_file_size', 1000000000);
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
@@ -24,6 +24,12 @@ error_reporting(E_ALL);
 // Set the default timezone to UTC
 date_default_timezone_set('UTC');
 
+
+if (defined('LC_CTYPE')) { // Check if LC_CTYPE is defined
+    setlocale(LC_CTYPE, 'C'); // Or 'en_US.UTF-8' or your preferred POSIX locale
+} else if (defined('LC_ALL')) { // Fallback to LC_ALL if LC_CTYPE is not defined
+    setlocale(LC_ALL, 'C');
+}
 // Use the Mal-Scraper library
 require 'vendor/autoload.php';
 use MalScraper\MalScraper;
@@ -60,6 +66,10 @@ $status = isset($_GET['st']) ? $_GET['st'] : 7;
 
 $size = isset($_GET['sz']) ? $_GET['sz'] : '';
 $nonseasonal = isset($_GET['ns']) ? $_GET['ns'] : '';
+
+$printed = false;
+$printed0 = false;
+$printed2 = false;
 
 function logApiRequestInfo() {
     // Define the log file path
@@ -155,14 +165,22 @@ function logApiRequestInfo() {
     }
 }
 
-function get_subdirectory($type, $id) {
+function get_subdirectory($dir, $type, $id) {
   $id = intval($id);
+  if ($id) {
   $subdirectory_number = floor($id / 10000);
-  $subdirectory_path = '../info/' . $type . '/' . $subdirectory_number . '/';
-  if (!is_dir($subdirectory_path) && ($type == "anime" || $type == "manga")) {
+  if ($type == "anime" || $type == "manga") {
+      $subdirectory_path = '../maldb/' . $dir . '/' . $type . '/' . $subdirectory_number . '/';
+  } else {
+	  $subdirectory_path = '../maldb/' . $dir . '/' . $subdirectory_number . '/';
+  }
+  if (!is_dir($subdirectory_path)) {
     mkdir($subdirectory_path, 0777, true); // Create directory with permissions
   }
   return strval($subdirectory_number);
+  } else {
+    mkdir('../maldb/' . $dir . '/', 0777, true); // Create directory with permissions
+  }
 }
 
 function clearCronJobs($scriptPath) {
@@ -171,8 +189,8 @@ function clearCronJobs($scriptPath) {
 
     $newCrontabLines = [];
     foreach ($crontabLines as $line) {
-        if (strpos($line, $scriptPath) === false) {
-            $newCrontabLines= $line;
+        if (strpos($line, $scriptPath) === false && strpos($line, 'cronjob.php') === false) {
+            $newCrontabLines[] = $line;
         }
     }
 
@@ -182,301 +200,144 @@ function clearCronJobs($scriptPath) {
 }
 
 function visit_url($url_base, $params, $query) {
-    $scriptPath = '/home/shagzgjm/public_html/scripts/visit_url.php';
     $qFilePath = '/home/shagzgjm/public_html/scripts/q_files/';
-    $debugFile = '/home/shagzgjm/public_html/scripts/debug.log';
-    $lockFile = '/tmp/visit_url.lock'; // Temporary lock file
-    $enableLocking = false; // Set to false to disable locking for testing
+    $jsonFilePath = $qFilePath . 'cron_tasks.json';
 
     if (!is_dir($qFilePath)) {
         mkdir($qFilePath, 0755, true);
     }
 
-    if ($enableLocking) {
-        // Acquire Lock with Timeout
-        $lockHandle = fopen($lockFile, 'c+');
-        $lockStartTime = time();
-        $locked = false;
-
-        if ($lockHandle) {
-            while (!flock($lockHandle, LOCK_EX | LOCK_NB)) {
-                if ((time() - $lockStartTime) >= 300) { // 5 minutes timeout
-                    fclose($lockHandle);
-                    //file_put_contents($debugFile, "Failed to acquire lock after 5 minutes, giving up.\n", FILE_APPEND);
-                    return;
-                }
-                sleep(60); // Wait for 1 minute
-            }
-            $locked = true;
-        } else {
-            //file_put_contents($debugFile, "Could not open lock file.\n", FILE_APPEND);
-            return;
-        }
-
-        if (!$locked) {
-            return; // Exit if locking failed
-        }
+    $urlParams = array_merge(['url' => $url_base], $params);
+    if (isset($query) && !empty($query)) {
+        $qFileName = 'q_' . hash('sha256', $query) . '.txt';
+        file_put_contents($qFilePath . $qFileName, $query);
+        $urlParams['qfile'] = $qFilePath . $qFileName;
+        unset($urlParams['q']);
     }
+    ksort($urlParams);
 
-    try {
-        $existingCrontabOutput = shell_exec('crontab -l 2>&1');
-        //file_put_contents($debugFile, "--- Crontab Output ---\n" . $existingCrontabOutput . "\n---\n", FILE_APPEND);
-        $crontabLines = explode("\n", trim($existingCrontabOutput));
-        //file_put_contents($debugFile, "Contents of \$crontabLines:\n" . print_r($crontabLines, true) . "\n---\n", FILE_APPEND);
-
-        $existingCronJobDetails = [];
-        $index = 0;
-        foreach ($crontabLines as $line) {
-            if (strpos($line, $scriptPath) !== false) {
-                $details = parseCronJobDetails($line);
-                //file_put_contents($debugFile, "Details after parsing: " . print_r($details, true) . "\n", FILE_APPEND);
-                if (is_array($details)) {
-                    $existingCronJobDetails[$index] = $details;
-                    $index++;
-                } else {
-                    //file_put_contents($debugFile, "parseCronJobDetails failed for line: " . $line . "\n", FILE_APPEND);
-                }
-            }
-        }
-
-        //file_put_contents($debugFile, "Contents of \$existingCronJobDetails after parsing:\n" . print_r($existingCronJobDetails, true) . "\n---\n", FILE_APPEND);
-
-        $urlParams = array_merge(['url' => $url_base], $params);
-        if (isset($query) && !empty($query)) {
-            $qFileName = 'q_' . hash('sha256', $query) . '.txt';
-            file_put_contents($qFilePath . $qFileName, $query);
-            $urlParams['qfile'] = $qFilePath . $qFileName;
-            unset($urlParams['q']);
-        }
-        ksort($urlParams);
-
-        $cronUrl = $url_base; // Define $cronUrl here
-
-        // --- START Duplicate Check ---
-        $cronJobDetails = [
-            'url' => $cronUrl,
-            'params' => $urlParams
-        ];
-
-        $isDuplicate = false;
-        foreach ($existingCronJobDetails as $existingJob) {
-            // Compare the base URL
-            if (isset($existingJob['url']) && $existingJob['url'] == $cronUrl) {
-                $paramsMatch = true;
-
-                // First, check if all parameters in the current job match the existing job
-                if (isset($cronJobDetails['params']) && is_array($cronJobDetails['params'])) {
-                    foreach ($cronJobDetails['params'] as $key => $value) {
-                        if ($key !== 'url') {
-                            if (!isset($existingJob['params'][$key]) || $existingJob['params'][$key] != $value) {
-                                $paramsMatch = false;
-                                break;
-                            }
-                        }
-                    }
-                } else {
-                    $paramsMatch = false;
-                }
-
-                // If the parameters from the current job match, now check if the existing job has any extra parameters
-                if ($paramsMatch && isset($existingJob['params']) && is_array($existingJob['params'])) {
-                    foreach ($existingJob['params'] as $key => $value) {
-                        if ($key !== 'url') {
-                            if (!isset($cronJobDetails['params'][$key]) || $cronJobDetails['params'][$key] != $value) {
-                                $paramsMatch = false;
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                // If both URL and parameters match, it's a duplicate
-                if ($paramsMatch) {
-                    $isDuplicate = true;
-                    file_put_contents($debugFile, "-- Duplicate Job Found --\n", FILE_APPEND);
-                    break;
-                }
-            }
-        }
-
-        //file_put_contents($debugFile, "Contents of \$existingCronJobDetails AFTER duplicate check:\n" . print_r($existingCronJobDetails, true) . "\n---\n", FILE_APPEND);
-        // --- END Duplicate Check ---
-
-        if (!$isDuplicate) {
-            //file_put_contents($debugFile, "-- New Cron Job Will Be Added --\n", FILE_APPEND);
-
-            // Determine the next cron job time (line 202)
-            $validMinutes = [1, 6, 11, 16, 21, 26, 31, 36, 41, 46, 51, 56];
-            $startHourInterval = 6;
-            $foundSlot = false;
-            $cronMinute = 1;
-            $cronHour = 6;
-
-            for ($hourInterval = $startHourInterval; $hourInterval <= 12; $hourInterval++) {
-                foreach ($validMinutes as $minute) {
-                    $jobCountForMinute = 0;
-                    foreach ($existingCronJobDetails as $job) {
-                        if (isset($job['minute']) && (int)$job['minute'] === $minute && isset($job['interval']) && (int)$job['interval'] === $hourInterval) {
-                            $jobCountForMinute++;
-                        }
-                    }
-
-                    if ($jobCountForMinute < 5) {
-                        $cronMinute = $minute;
-                        $cronHour = $hourInterval;
-                        $foundSlot = true;
-                        break 2; // Break out of both loops
-                    }
-                }
-            }
-
-            if (!$foundSlot) {
-                // Fallback, maybe clear jobs or log an error
-                clearCronJobs('/home/shagzgjm/public_html/scripts/visit_url.php');
-                return;
-            }
-
-            // Added logging for calculated cron time
-            //file_put_contents($debugFile, "Calculated Next Cron Time: HourInterval=" . $cronHour . ", Minute=" . $cronMinute . "\n", FILE_APPEND);
-
-            $existingCrontab = shell_exec('crontab -l'); // Re-fetching here to ensure it's up-to-date
-            $cronJobCommand = $cronMinute . " */" . $cronHour . " * * * /usr/local/bin/php " . $scriptPath;
-            foreach ($urlParams as $key => $value) {
-                $cronJobCommand .= " " . $key . "='" . $value . "'";
-            }
-            //$cronJobCommand .= " >> /home/shagzgjm/cron_output.log 2>> /home/shagzgjm/cron_errors.log";
-
-            $newCronJobLine = $cronJobCommand; // Assign the value to $newCronJobLine
-
-            $finalCrontab = trim($existingCrontab) . "\n" . $newCronJobLine . "\n";
-            $command = "echo " . escapeshellarg($finalCrontab) . " | crontab -";
-            exec($command);
-
-            // Debugging log
-            //file_put_contents($debugFile, "Added cron job: " . $cronJobCommand . "\n", FILE_APPEND);
-        } else {
-            //file_put_contents($debugFile, "-- Cron Job Not Added (Duplicate) --\n", FILE_APPEND);
-        }
-
-    } finally {
-        if ($enableLocking && isset($lockHandle)) {
-            flock($lockHandle, LOCK_UN);
-            fclose($lockHandle);
-        }
-    }
-}
-
-function parseCronJobDetails($jobLine) {
-    $parts = explode(' ', $jobLine);
-    if (count($parts) < 6) {
-        return null; // Invalid cron job line
-    }
-
-    $minute = $parts[0];
-    $hourPart = $parts[1];
-    $scriptPath = '/home/shagzgjm/public_html/scripts/visit_url.php';
-
-    if ($parts[5] !== '/usr/local/bin/php' || (isset($parts[6]) && $parts[6] !== $scriptPath)) {
-        return null; // Not our script
-    }
-
-    $details = [
-        'minute' => $minute,
-        'hour' => null, // Changed to null initially
-        'interval' => null, // Added a field for the interval
-        'url' => null,
-        'params' => [],
+    $newTask = [
+        'url' => $url_base,
+        'params' => $urlParams,
     ];
 
-    if (preg_match('/^\*\/\d+$/', $hourPart, $matches)) {
-        $details['interval'] = (int)substr($hourPart, 2);
-        $details['hour'] = 0; // Maybe set hour to 0 or some indicator that it's an interval
-    } else {
-        $details['hour'] = (int)$hourPart;
-    }
-
-    $foundScript = false;
-    for ($i = 6; $i < count($parts); $i++) {
-        if (!$foundScript && $parts[$i] === $scriptPath) {
-            $foundScript = true;
-            continue;
-        }
-
-        if ($foundScript && strpos($parts[$i], '=') !== false) {
-            list($key, $valueWithQuotes) = explode('=', $parts[$i], 2);
-            $value = trim($valueWithQuotes, "'");
-            $details['params'][$key] = $value;
-            if ($key === 'url') {
-                $details['url'] = $value;
-            }
+    $existingTasks = [];
+    if (file_exists($jsonFilePath)) {
+        $existingTasks = json_decode(file_get_contents($jsonFilePath), true);
+        if (!is_array($existingTasks)) {
+            $existingTasks = [];
         }
     }
-    ksort($details['params']);
-    return $details;
+
+    $isDuplicate = false;
+    foreach ($existingTasks as $task) {
+        // Sort parameters for consistent comparison
+        $taskParams = $task['params'];
+        ksort($taskParams);
+        $newTaskParams = $newTask['params'];
+        ksort($newTaskParams);
+
+        if ($task['url'] === $newTask['url'] && $taskParams === $newTaskParams) {
+            $isDuplicate = true;
+            break;
+        }
+    }
+
+    if (!$isDuplicate) {
+        $existingTasks[] = $newTask;
+        file_put_contents($jsonFilePath, json_encode($existingTasks, JSON_PRETTY_PRINT));
+    }
 }
 
+
+// Add the new cron job to run cronjob.php every 6 hours
+$cronjobScriptPath = '/usr/local/bin/php /home/shagzgjm/public_html/scripts/cron_job.php';
+//$newCronJobLine = '0 */6 * * * ' . $cronjobScriptPath . ' >> /home/shagzgjm/cron_output.log 2>> /home/shagzgjm/cron_errors.log';
+$newCronJobLine = '*/15 */6 * * * ' . $cronjobScriptPath;
+
+$existingCrontab = shell_exec('crontab -l 2>&1');
+if ($existingCrontab) {
+	$crontabLines = explode("\n", $existingCrontab);
+} else {
+	$crontabLines = [];
+}
+$cronjobExists = false;
+foreach ($crontabLines as $line) {
+    if (trim($line) === $newCronJobLine) {
+        $cronjobExists = true;
+        break;
+    }
+}
+
+//if (!$cronjobExists) {
+//    $finalCrontab = $existingCrontab . "\n" . $newCronJobLine . "\n";
+//    $command = "echo " . escapeshellarg($finalCrontab) . " | crontab -";
+//    exec($command);
+//}
+
 function getPreset($query, $type) {
-			if (strtolower($query) == "more") {
+			$queryis = str_replace(':', '', $query);
+			if (strtolower($queryis) == "more") {
 				if (strtolower($type) == "anime") {
-					$query = "#more{anime_id} {background-image:url(\"{anime_image_path}\")}";
+					$query = "#more{anime_id} {background:url(\"{anime_image_path}\");background-image:url(\"{anime_image_path}}";
 				} else {
-					$query = "#more{manga_id} {background-image:url(\"{manga_image_path}\")}";
+					$query = "#more{manga_id} {background:url(\"{manga_image_path}\");background-image:url(\"{manga_image_path}}";
 				}
-			} elseif (strtolower($query) == "moretdbeforelink") {
+			} elseif (strtolower($queryis) == "moretdbeforelink") {
 				if (strtolower($type) == "anime") {
 					$query = "#more{anime_id} td:before, a[href^=\"/{type}/{anime_id}/\"]:before {background:url(\"{anime_image_path}\")}";
 				} else {
 					$query = "#more{manga_id} td:before, a[href^=\"/{type}/{manga_id}/\"]:before {background:url(\"{manga_image_path}\")}";
 				}
-			} elseif (strtolower($query) == "animetitle") {
+			} elseif (strtolower($queryis) == "animetitle") {
 				if (strtolower($type) == "anime") {
 					$query = ".animetitle a[href^=\"/{type}/{anime_id}/\"]{background-image:url(\"{anime_image_path}\")}";
 				} else {
 					$query = ".animetitle a[href^=\"/{type}/{manga_id}/\"]{background-image:url(\"{manga_image_path}\")}";
 				}
-			} elseif (strtolower($query) == "animetitlebefore") {
+			} elseif (strtolower($queryis) == "animetitlebefore") {
 				if (strtolower($type) == "anime") {
 					$query = ".animetitle a[href^=\"/{type}/{anime_id}/\"]:before{background-image:url(\"{anime_image_path}\")}";
 				} else {
 					$query = ".animetitle a[href^=\"/{type}/{manga_id}/\"]:before{background-image:url(\"{manga_image_path}\")}";
 				}
-			} elseif (strtolower($query) == "animetitleafter") {
+			} elseif (strtolower($queryis) == "animetitleafter") {
 				if (strtolower($type) == "anime") {
 					$query = ".animetitle a[href^=\"/{type}/{anime_id}/\"]:after{background-image:url(\"{anime_image_path}\")}";
 				} else {
 					$query = ".animetitle a[href^=\"/{type}/{manga_id}/\"]:after{background-image:url(\"{manga_image_path}\")}";
 				}
-			} elseif (strtolower($query) == "datatitle") {
+			} elseif (strtolower($queryis) == "datatitle") {
 				if (strtolower($type) == "anime") {
 					$query = ".data.title a[href^=\"/{type}/{anime_id}/\"]{background-image:url(\"{anime_image_path}\")}";
 				} else {
 					$query = ".data.title a[href^=\"/{type}/{manga_id}/\"]{background-image:url(\"{manga_image_path}\")}";
 				}
-			} elseif (strtolower($query) == "datatitlebefore") {
+			} elseif (strtolower($queryis) == "datatitlebefore") {
 				if (strtolower($type) == "anime") {
 					$query = ".data.title a[href^=\"/{type}/{anime_id}/\"]:before{background-image:url(\"{anime_image_path}\")}";
 				} else {
 					$query = ".data.title a[href^=\"/{type}/{manga_id}/\"]:before{background-image:url(\"{manga_image_path}\")}";
 				}
-			} elseif (strtolower($query) == "datatitleafter") {
+			} elseif (strtolower($queryis) == "datatitleafter") {
 				if (strtolower($type) == "anime") {
 					$query = ".data.title a[href^=\"/{type}/{anime_id}/\"]:after{background-image:url(\"{anime_image_path}\")}";
 				} else {
 					$query = ".data.title a[href^=\"/{type}/{manga_id}/\"]:after{background-image:url(\"{manga_image_path}\")}";
 				}
-			} elseif (strtolower($query) == "dataimagelink") {
+			} elseif (strtolower($queryis) == "dataimagelink") {
 				if (strtolower($type) == "anime") {
 					$query = ".data.image a[href^=\"/{type}/{anime_id}/\"]{background-image:url(\"{anime_image_path}\")}";
 				} else {
 					$query = ".data.image a[href^=\"/{type}/{manga_id}/\"]{background-image:url(\"{manga_image_path}\")}";
 				}
-			} elseif (strtolower($query) == "dataimagelinkbefore" || strtolower($query) == ":preset:") {
+			} elseif (strtolower($queryis) == "dataimagelinkbefore" || strtolower($queryis) == "preset") {
 				if (strtolower($type) == "anime") {
 					$query = ".data.image a[href^=\"/{type}/{anime_id}/\"]:before{background-image:url(\"{anime_image_path}\")}";
 				} else {
 					$query = ".data.image a[href^=\"/{type}/{manga_id}/\"]:before{background-image:url(\"{manga_image_path}\")}";
 				}
-			} elseif (strtolower($query) == "dataimagelinkafter") {
+			} elseif (strtolower($queryis) == "dataimagelinkafter") {
 				if (strtolower($type) == "anime") {
 					$query = ".data.image a[href^=\"/{type}/{anime_id}/\"]:after{background-image:url(\"{anime_image_path}\")}";
 				} else {
@@ -493,15 +354,15 @@ switch ($method) {
     case 'info':
         if ($type && $id) {
             $result = $myMalScraper->getInfo($type, $id);
-			$subdirectory = get_subdirectory($type, $id);
+			$subdirectory = get_subdirectory(str_replace("-", "", $method), $type, $id);
 			$decodedResult = json_decode($result, true);
-			$filePath = '../info/' . $type . '/' . $subdirectory . '/' . $id . '.json';
+			$filePath = '../maldb/' . str_replace("-", "", $method) . '/' . $type . '/' . $subdirectory . '/' . $id . '.json';
 
 			if ($decodedResult['status'] == 200) {
 
 $imageUrls = $decodedResult['data']['images'];
 if ($imageUrls) {
-    $reverseCoverFilePath = '../info/reversecover.json';
+    $reverseCoverFilePath = '../maldb/info/reversecover.json';
 
     // 1. Read existing JSON (if any)
     if (file_exists($reverseCoverFilePath)) {
@@ -569,6 +430,10 @@ file_put_contents($reverseCoverFilePath, $reverseCoverJson, FILE_USE_INCLUDE_PAT
     case 'studioproducer':
         if ($id) {
             $result = $myMalScraper->getStudioProducer($id, $page);
+			$subdirectory = get_subdirectory(str_replace("-", "", $method), $type, $id);
+			$decodedResult = json_decode($result, true);
+			$filePath = '../maldb/' . str_replace("-", "", $method) . '/' . $subdirectory . '/' . $id . '.json';
+			file_put_contents($filePath, $result, FILE_USE_INCLUDE_PATH);
             print_r($result);
         } else {
             print_r(paramError('2'));
@@ -729,31 +594,55 @@ file_put_contents($reverseCoverFilePath, $reverseCoverJson, FILE_USE_INCLUDE_PAT
     case 'all-anime-genre':
     case 'allanimegenre':
         $result = $myMalScraper->getAllAnimeGenre();
+		$subdirectory = get_subdirectory(str_replace("-", "", $method), $type, $id);
+		$decodedResult = json_decode($result, true);
+		$filePath = '../maldb/' . str_replace("-", "", $method) . '/' . str_replace("-", "", $method) . '.json';
+		file_put_contents($filePath, $result, FILE_USE_INCLUDE_PATH);
         print_r($result);
         break;
     case 'all-manga-genre':
     case 'allmangagenre':
         $result = $myMalScraper->getAllMangaGenre();
+		$subdirectory = get_subdirectory(str_replace("-", "", $method), $type, $id);
+		$decodedResult = json_decode($result, true);
+		$filePath = '../maldb/' . str_replace("-", "", $method) . '/' . str_replace("-", "", $method) . '.json';
+		file_put_contents($filePath, $result, FILE_USE_INCLUDE_PATH);
         print_r($result);
         break;
     case 'all-studio-producer':
     case 'allstudioproducer':
         $result = $myMalScraper->getAllStudioProducer();
+		$subdirectory = get_subdirectory(str_replace("-", "", $method), $type, $id);
+		$decodedResult = json_decode($result, true);
+		$filePath = '../maldb/' . str_replace("-", "", $method) . '/' . str_replace("-", "", $method) . '.json';
+		file_put_contents($filePath, $result, FILE_USE_INCLUDE_PATH);
         print_r($result);
         break;
     case 'all-magazine':
     case 'allmagazine':
         $result = $myMalScraper->getAllMagazine();
+		$subdirectory = get_subdirectory(str_replace("-", "", $method), $type, $id);
+		$decodedResult = json_decode($result, true);
+		$filePath = '../maldb/' . str_replace("-", "", $method) . '/' . str_replace("-", "", $method) . '.json';
+		file_put_contents($filePath, $result, FILE_USE_INCLUDE_PATH);
         print_r($result);
         break;
     case 'all-review':
     case 'allreview':
         $result = $myMalScraper->getAllReview($type, $page);
+		$subdirectory = get_subdirectory(str_replace("-", "", $method), $type, $id);
+		$decodedResult = json_decode($result, true);
+		$filePath = '../maldb/' . str_replace("-", "", $method) . '/' . str_replace("-", "", $method) . '.json';
+		file_put_contents($filePath, $result, FILE_USE_INCLUDE_PATH);
         print_r($result);
         break;
     case 'all-recommendation':
     case 'allrecommendation':
         $result = $myMalScraper->getAllRecommendation($type, $page);
+		$subdirectory = get_subdirectory(str_replace("-", "", $method), $type, $id);
+		$decodedResult = json_decode($result, true);
+		$filePath = '../maldb/' . str_replace("-", "", $method) . '/' . str_replace("-", "", $method) . '.json';
+		file_put_contents($filePath, $result, FILE_USE_INCLUDE_PATH);
         print_r($result);
         break;
 
@@ -761,7 +650,7 @@ file_put_contents($reverseCoverFilePath, $reverseCoverJson, FILE_USE_INCLUDE_PAT
     case 'search-anime':
     case 'searchanime':
         if ($query) {
-            $result = $myMalScraper->searchAnime($query, $page);
+            $result = $myMalScraper->searchAnime(str_replace([' ', '_', '-'], "%20", str_replace('"', '', $query)), $page);
             print_r($result);
         } else {
             print_r(paramError('2'));
@@ -846,14 +735,15 @@ file_put_contents($reverseCoverFilePath, $reverseCoverJson, FILE_USE_INCLUDE_PAT
 				$user = "_All_";
 			}
             $result = $myMalScraper->getUser($user);
+
 			if (strtolower($query) == "totalentries") {
 				header('Content-Type: text/css');
 				$decodedResult = json_decode($result, true);
 				if (strtolower($user) == "iridescentjaune") {
 					if (strtolower($type) == "anime") {
-						print_r ('a.status-button.all_anime::before{ content:"\f6ed ";padding: inherit;  width: inherit;  margin-left: inherit;  font-size: 16px !important;  position: inherit;}a.status-button.all_anime::after{content: "(' . $decodedResult['data']['anime_stat']['status']['total'] . ')" !important;color: red !important; opacity: 1 !important;  font-size: 12px !important;    background: transparent !important;    top: 33px !important;}a.status-button.watching::before{ content:"\f6ed ";padding: inherit;  width: inherit;  margin-left: inherit;  font-size: 16px !important;  position: inherit;}a.status-button.watching::after{content: "(' . $decodedResult['data']['anime_stat']['status']['watching'] . ')" !important;color: red !important; opacity: 1 !important;  font-size: 12px !important;    background: transparent !important;    top: 33px !important;}a.status-button.completed::before{ content:"\f6ed ";padding: inherit;  width: inherit;  margin-left: inherit;  font-size: 16px !important;  position: inherit;}a.status-button.completed::after{content: "(' . $decodedResult['data']['anime_stat']['status']['completed'] . ')" !important;color: red !important; opacity: 1 !important;  font-size: 12px !important;    background: transparent !important;    top: 33px !important;}a.status-button.onhold::before{ content:"\f6ed ";padding: inherit;  width: inherit;  margin-left: inherit;  font-size: 16px !important;  position: inherit;}a.status-button.onhold::after{content: "(' . $decodedResult['data']['anime_stat']['status']['on_hold'] . ')" !important;color: red !important; opacity: 1 !important;  font-size: 12px !important;    background: transparent !important;    top: 33px !important;}a.status-button.dropped::before{ content:"\f6ed ";padding: inherit;  width: inherit;  margin-left: inherit;  font-size: 16px !important;  position: inherit;}a.status-button.dropped::after{content: "(' . $decodedResult['data']['anime_stat']['status']['dropped'] . ')" !important;color: red !important; opacity: 1 !important;  font-size: 12px !important;    background: transparent !important;    top: 33px !important;}a.status-button.plantowatch::before{ content:"\f6ed ";padding: inherit;  width: inherit;  margin-left: inherit;  font-size: 16px !important;  position: inherit;}a.status-button.plantowatch::after{content: "(' . $decodedResult['data']['anime_stat']['status']['plan_to_watch'] . ')" !important;color: red !important; opacity: 1 !important;  font-size: 12px !important;    background: transparent !important;    top: 33px !important;}');
+						print_r ('a.status-button.all_anime::before{ font-size: 9px !important; content:"\f6ed ";padding: inherit;  width: inherit;  margin-left: inherit;  font-size: 16px !important;  position: inherit;}a.status-button.all_anime::after{content: "(' . $decodedResult['data']['anime_stat']['status']['total'] . ')" !important;color: red !important; opacity: 1 !important;  font-size: 12px !important;    background: transparent !important;    top: 33px !important;}a.status-button.watching::before{ font-size: 9px !important; content:"\f6ed ";padding: inherit;  width: inherit;  margin-left: inherit;  font-size: 16px !important;  position: inherit;}a.status-button.watching::after{content: "(' . $decodedResult['data']['anime_stat']['status']['watching'] . ')" !important;color: red !important; opacity: 1 !important;  font-size: 12px !important;    background: transparent !important;    top: 33px !important;}a.status-button.completed::before{ font-size: 9px !important; content:"\f6ed ";padding: inherit;  width: inherit;  margin-left: inherit;  font-size: 16px !important;  position: inherit;}a.status-button.completed::after{content: "(' . $decodedResult['data']['anime_stat']['status']['completed'] . ')" !important;color: red !important; opacity: 1 !important;  font-size: 12px !important;    background: transparent !important;    top: 33px !important;}a.status-button.onhold::before{ font-size: 9px !important; content:"\f6ed ";padding: inherit;  width: inherit;  margin-left: inherit;  font-size: 16px !important;  position: inherit;}a.status-button.onhold::after{content: "(' . $decodedResult['data']['anime_stat']['status']['on_hold'] . ')" !important;color: red !important; opacity: 1 !important;  font-size: 12px !important;    background: transparent !important;    top: 33px !important;}a.status-button.dropped::before{ font-size: 9px !important; content:"\f6ed ";padding: inherit;  width: inherit;  margin-left: inherit;  font-size: 16px !important;  position: inherit;}a.status-button.dropped::after{content: "(' . $decodedResult['data']['anime_stat']['status']['dropped'] . ')" !important;color: red !important; opacity: 1 !important;  font-size: 12px !important;    background: transparent !important;    top: 33px !important;}a.status-button.plantowatch::before{ font-size: 9px !important; content:"\f6ed ";padding: inherit;  width: inherit;  margin-left: inherit;  font-size: 16px !important;  position: inherit;}a.status-button.plantowatch::after{content: "(' . $decodedResult['data']['anime_stat']['status']['plan_to_watch'] . ')" !important;color: red !important; opacity: 1 !important;  font-size: 12px !important;    background: transparent !important;    top: 33px !important;}');
 					} else if (strtolower($type) == "manga") {
-						print_r ('a.status-button.all_anime::before{ content:"\f6ed ";padding: inherit;  width: inherit;  margin-left: inherit;  font-size: 16px !important;  position: inherit;}a.status-button.all_anime::after{content: "(' . $decodedResult['data']['manga_stat']['status']['total'] . ')" !important;color: red !important; opacity: 1 !important;  font-size: 12px !important;    background: transparent !important;    top: 33px !important;}a.status-button.watching::before{ content:"\f6ed ";padding: inherit;  width: inherit;  margin-left: inherit;  font-size: 16px !important;  position: inherit;}a.status-button.reading::after{content: "(' . $decodedResult['data']['manga_stat']['status']['reading'] . ')" !important;color: red !important; opacity: 1 !important;  font-size: 12px !important;    background: transparent !important;    top: 33px !important;}a.status-button.completed::before{ content:"\f6ed ";padding: inherit;  width: inherit;  margin-left: inherit;  font-size: 16px !important;  position: inherit;}a.status-button.completed::after{content: "(' . $decodedResult['data']['manga_stat']['status']['completed'] . ')" !important;color: red !important; opacity: 1 !important;  font-size: 12px !important;    background: transparent !important;    top: 33px !important;}a.status-button.onhold::before{ content:"\f6ed ";padding: inherit;  width: inherit;  margin-left: inherit;  font-size: 16px !important;  position: inherit;}a.status-button.onhold::after{content: "(' . $decodedResult['data']['manga_stat']['status']['on_hold'] . ')" !important;color: red !important; opacity: 1 !important;  font-size: 12px !important;    background: transparent !important;    top: 33px !important;}a.status-button.dropped::before{ content:"\f6ed ";padding: inherit;  width: inherit;  margin-left: inherit;  font-size: 16px !important;  position: inherit;}a.status-button.dropped::after{content: "(' . $decodedResult['data']['manga_stat']['status']['dropped'] . ')" !important;color: red !important; opacity: 1 !important;  font-size: 12px !important;    background: transparent !important;    top: 33px !important;}a.status-button.plantowatch::before{ content:"\f6ed ";padding: inherit;  width: inherit;  margin-left: inherit;  font-size: 16px !important;  position: inherit;}a.status-button.plantoread::after{content: "(' . $decodedResult['data']['manga_stat']['status']['plan_to_read'] . ')" !important;color: red !important; opacity: 1 !important;  font-size: 12px !important;    background: transparent !important;    top: 33px !important;}');
+						print_r ('a.status-button.all_anime::before{ font-size: 9px !important; content:"\f6ed ";padding: inherit;  width: inherit;  margin-left: inherit;  font-size: 16px !important;  position: inherit;}a.status-button.all_anime::after{content: "(' . $decodedResult['data']['manga_stat']['status']['total'] . ')" !important;color: red !important; opacity: 1 !important;  font-size: 12px !important;    background: transparent !important;    top: 33px !important;}a.status-button.watching::before{ font-size: 9px !important; content:"\f6ed ";padding: inherit;  width: inherit;  margin-left: inherit;  font-size: 16px !important;  position: inherit;}a.status-button.reading::after{content: "(' . $decodedResult['data']['manga_stat']['status']['reading'] . ')" !important;color: red !important; opacity: 1 !important;  font-size: 12px !important;    background: transparent !important;    top: 33px !important;}a.status-button.completed::before{ font-size: 9px !important; content:"\f6ed ";padding: inherit;  width: inherit;  margin-left: inherit;  font-size: 16px !important;  position: inherit;}a.status-button.completed::after{content: "(' . $decodedResult['data']['manga_stat']['status']['completed'] . ')" !important;color: red !important; opacity: 1 !important;  font-size: 12px !important;    background: transparent !important;    top: 33px !important;}a.status-button.onhold::before{ font-size: 9px !important; content:"\f6ed ";padding: inherit;  width: inherit;  margin-left: inherit;  font-size: 16px !important;  position: inherit;}a.status-button.onhold::after{content: "(' . $decodedResult['data']['manga_stat']['status']['on_hold'] . ')" !important;color: red !important; opacity: 1 !important;  font-size: 12px !important;    background: transparent !important;    top: 33px !important;}a.status-button.dropped::before{ font-size: 9px !important; content:"\f6ed ";padding: inherit;  width: inherit;  margin-left: inherit;  font-size: 16px !important;  position: inherit;}a.status-button.dropped::after{content: "(' . $decodedResult['data']['manga_stat']['status']['dropped'] . ')" !important;color: red !important; opacity: 1 !important;  font-size: 12px !important;    background: transparent !important;    top: 33px !important;}a.status-button.plantowatch::before{ font-size: 9px !important; content:"\f6ed ";padding: inherit;  width: inherit;  margin-left: inherit;  font-size: 16px !important;  position: inherit;}a.status-button.plantoread::after{content: "(' . $decodedResult['data']['manga_stat']['status']['plan_to_read'] . ')" !important;color: red !important; opacity: 1 !important;  font-size: 12px !important;    background: transparent !important;    top: 33px !important;}');
 					}
 				} else {
 					if (strtolower($type) == "anime") {
@@ -914,16 +804,22 @@ file_put_contents($reverseCoverFilePath, $reverseCoverJson, FILE_USE_INCLUDE_PAT
 			if (strtolower($user) == "all" || strtolower($user) == "username") {
 				$user = "_All_";
 			}
+			$filePath = '../maldb/userlist/' . $user . '_' . $type . '_' . $status . '_' . $genre .  '_' . $order . '.json';
+			//if (file_exists($filePath)) {
+			//	$file = file_get_contents($filePath, FILE_USE_INCLUDE_PATH);
+			//	print_r($file);
+			//	$printed0 = true;
+			//}
             $result = $myMalScraper->getUserList($user, $type, $status, $genre, $order);
 			$decodedResult = json_decode($result, true);
-			$filePath = '../userlist/' . $user . '_' . $type . '_' . $status . '_' . $genre .  '_' . $order . '.json';
+
 			if ($decodedResult['status'] == 200) {
 				/*$timestamp = date('Y-m-d\TH:i:s.u\Z');
 				$result = "/* Accessed  " . $timestamp . " *[DEL]/ \r" . $result;*/
 				
 				file_put_contents($filePath, $result, FILE_USE_INCLUDE_PATH);
 
-				print_r($result);
+				if ($printed0 == false) print_r($result);
 			} else {
 
 				if (file_exists($filePath)) {
@@ -942,7 +838,8 @@ file_put_contents($reverseCoverFilePath, $reverseCoverJson, FILE_USE_INCLUDE_PAT
         if ($user) {
             header('Content-Type: text/css');
 
-            $type = $type ? $type : 'anime';
+            $type = in_array(strtolower($type ?? ''), ['anime', 'manga', 'all']) ? strtolower($type ?? '') : 'anime';
+			//$type = $type ? $type : 'anime';
 			$status = $status ? $status : 7;
             $genre = $genre ? $genre : 0;
             $query = $query ? $query : false;
@@ -951,8 +848,16 @@ file_put_contents($reverseCoverFilePath, $reverseCoverJson, FILE_USE_INCLUDE_PAT
 				break;
 			}
 			if (strtolower($type) == ":type:") { $type = "all"; }
-			if (strtolower($user) == "all" & strtolower($type) == "all" & strtolower($query) == "more") { $type = "anime"; }
-			if (strtolower($user) == "all" || strtolower($user) == "username") {
+			if (strtolower($type) == "all" & str_contains(strtolower($query), 'more')) { 
+				if (str_contains(strtolower($query), 'manga')) {
+					$type = "manga";
+					$query = str_replace('anime', 'manga', strtolower($query));
+				} else {
+					$type = "anime";
+					$query = str_replace('manga', 'anime', strtolower($query));
+				}
+			}
+			if (strtolower($user) == "all" || str_contains(strtolower($query), 'username') || str_contains(strtolower($user), 'username')) {
 				$user = "_All_";
 			}
 			$typewas = $type;
@@ -960,18 +865,18 @@ file_put_contents($reverseCoverFilePath, $reverseCoverJson, FILE_USE_INCLUDE_PAT
 			if (strtolower($type) == "all") {
 				$typewas = "all";
 				$type = "manga";
-			if (strtolower($querywas) == "hidehentai" || strtolower($querywas) == "hidegenre") {
+			if (strtolower($querywas) == "hidehentai" || strtolower($querywas) == "hidegenre" || str_contains(strtolower($querywas), "hidehentai")) {
 				if (strtolower($type) == "anime") {
-					$query = "body[data-work=\"anime\"] span.add a[href*=\"/{anime_id}/\"], body[data-work=\"anime\"] .add-edit-more a[href*=\"/{anime_id}/\"], body[data-work=\"anime\"] .link[href^=\"/anime/{anime_id}/\"] ~ .add-edit-more, body[data-work=\"anime\"] .progress-{anime_id}, body[data-work=\"anime\"] #tags-{anime_id} { display: none !important; } body[data-work=\"anime\"] #tags-{anime_id} ~ * { display: none !important; } body[data-work=\"anime\"] td > a[href*=\"/{anime_id}/\"] { pointer-events: none; } body[data-work=\"anime\"] .data.image a[href*=\"/{anime_id}/\"] .image { visibility: hidden !important; } body[data-work=\"anime\"] .data.title a[href*=\"/{anime_id}/\"], body[data-work=\"anime\"] .data.title.clearfix a[href*=\"/{anime_id}/\"].link.sort { font-size: 0 !important; } body[data-work=\"anime\"] .data.title a[href*=\"/{anime_id}/\"]:after, body[data-work=\"anime\"] .data.title.clearfix a[href*=\"/{anime_id}/\"].link.sort:after { font-size: 13px; content: \"Unavailable\"; } body[data-work=\"anime\"] .data.image a[href*=\"/{anime_id}/\"], body[data-work=\"anime\"] .data.image a[href*=\"/{anime_id}/\"]:before, body[data-work=\"anime\"] .data.image a[href*=\"/{anime_id}/\"]:after, body[data-work=\"anime\"] .data.title [href^=\"/{anime_id}/\"]:before { background-image: url(https://shaggyze.github.io/Themes/unavailable.png) !important; border: 2px solid #fff; } .list-table .list-table-data:hover .data.title .link[href^=\"/anime/{anime_id}/\"]::before { content:\"unavailable\" !important; }";
+					$query = "body[data-work=\"{type}\"] span.add a[href*=\"/{anime_id}/\"], body[data-work=\"{type}\"] .add-edit-more a[href*=\"/{anime_id}/\"], body[data-work=\"{type}\"] .link[href^=\"/{type}/{anime_id}/\"] ~ .add-edit-more, body[data-work=\"{type}\"] .progress-{anime_id}, body[data-work=\"{type}\"] #tags-{anime_id} { display: none !important; } body[data-work=\"{type}\"] tr.list-table-data > #tags-{anime_id} ~ td { display: none !important; } body[data-work=\"{type}\"] td > a[href*=\"/{anime_id}/\"] { pointer-events: none; } body[data-work=\"{type}\"] .data.image a[href*=\"/{anime_id}/\"] .image { visibility: hidden !important; } body[data-work=\"{type}\"] .data.title a[href*=\"/{anime_id}/\"], body[data-work=\"{type}\"] .data.title.clearfix a[href*=\"/{anime_id}/\"].link.sort { font-size: 0 !important; } body[data-work=\"{type}\"] .data.title a[href*=\"/{anime_id}/\"]:after, body[data-work=\"{type}\"] .data.title.clearfix a[href*=\"/{anime_id}/\"].link.sort:after { font-size: 13px; content: \"Unavailable\"; } body[data-work=\"{type}\"] .data.image a[href*=\"/{anime_id}/\"], body[data-work=\"{type}\"] .data.image a[href*=\"/{anime_id}/\"]:before, body[data-work=\"{type}\"] .data.image a[href*=\"/{anime_id}/\"]:after, body[data-work=\"{type}\"] .data.title [href^=\"/{anime_id}/\"]:before { background-image: url(https://shaggyze.github.io/Themes/unavailable.png) !important; border: 2px solid #fff; } .list-table .list-table-data:hover .data.title .link[href^=\"/{type}/{anime_id}/\"]::before { content:\"unavailable\" !important; }";
 				} else if (strtolower($type) == "manga") {
-					$query = "body[data-work=\"manga\"] span.add a[href*=\"/{manga_id}/\"], body[data-work=\"manga\"] .add-edit-more a[href*=\"/{manga_id}/\"], body[data-work=\"manga\"] .link[href^=\"/manga/{manga_id}/\"] ~ .add-edit-more, body[data-work=\"manga\"] .progress-{manga_id}, body[data-work=\"manga\"] #tags-{manga_id} { display: none !important; } body[data-work=\"manga\"] #tags-{manga_id} ~ * { display: none !important; } body[data-work=\"manga\"] td > a[href*=\"/{manga_id}/\"] { pointer-events: none; } body[data-work=\"manga\"] .data.image a[href*=\"/{manga_id}/\"] .image { visibility: hidden !important; } body[data-work=\"manga\"] .data.title a[href*=\"/{manga_id}/\"], body[data-work=\"manga\"] .data.title.clearfix a[href*=\"/{manga_id}/\"].link.sort { font-size: 0 !important; } body[data-work=\"manga\"] .data.title a[href*=\"/{manga_id}/\"]:after, body[data-work=\"manga\"] .data.title.clearfix a[href*=\"/{manga_id}/\"].link.sort:after { font-size: 13px; content: \"Unavailable\"; } body[data-work=\"manga\"] .data.image a[href*=\"/{manga_id}/\"], body[data-work=\"manga\"] .data.image a[href*=\"/{manga_id}/\"]:before, body[data-work=\"manga\"] .data.image a[href*=\"/{manga_id}/\"]:after, body[data-work=\"manga\"] .data.title [href^=\"/{manga_id}/\"]:before { background-image: url(https://shaggyze.github.io/Themes/unavailable.png) !important; border: 2px solid #fff; } .list-table .list-table-data:hover .data.title .link[href^=\"/manga/{manga_id}/\"]::before { content:\"unavailable\" !important; }";
+					$query = "body[data-work=\"{type}\"] span.add a[href*=\"/{manga_id}/\"], body[data-work=\"{type}\"] .add-edit-more a[href*=\"/{manga_id}/\"], body[data-work=\"{type}\"] .link[href^=\"/{type}/{manga_id}/\"] ~ .add-edit-more, body[data-work=\"{type}\"] .progress-{manga_id}, body[data-work=\"{type}\"] #tags-{manga_id} { display: none !important; } body[data-work=\"{type}\"] tr.list-table-data > #tags-{manga_id} ~ td { display: none !important; } body[data-work=\"{type}\"] td > a[href*=\"/{manga_id}/\"] { pointer-events: none; } body[data-work=\"{type}\"] .data.image a[href*=\"/{manga_id}/\"] .image { visibility: hidden !important; } body[data-work=\"{type}\"] .data.title a[href*=\"/{manga_id}/\"], body[data-work=\"{type}\"] .data.title.clearfix a[href*=\"/{manga_id}/\"].link.sort { font-size: 0 !important; } body[data-work=\"{type}\"] .data.title a[href*=\"/{manga_id}/\"]:after, body[data-work=\"{type}\"] .data.title.clearfix a[href*=\"/{manga_id}/\"].link.sort:after { font-size: 13px; content: \"Unavailable\"; } body[data-work=\"{type}\"] .data.image a[href*=\"/{manga_id}/\"], body[data-work=\"{type}\"] .data.image a[href*=\"/{manga_id}/\"]:before, body[data-work=\"{type}\"] .data.image a[href*=\"/{manga_id}/\"]:after, body[data-work=\"{type}\"] .data.title [href^=\"/{manga_id}/\"]:before { background-image: url(https://shaggyze.github.io/Themes/unavailable.png) !important; border: 2px solid #fff; } .list-table .list-table-data:hover .data.title .link[href^=\"/{type}/{manga_id}/\"]::before { content:\"unavailable\" !important; }";
 				}
 				$query = $query;
-			} else if (strtolower($querywas) == "showownerhentai" || strtolower($querywas) == "showownergenre") {
+			} else if (strtolower($querywas) == "showownerhentai" || strtolower($querywas) == "showownergenre" || str_contains(strtolower($querywas), "showownerhentai")) {
 				if (strtolower($type) == "anime") {
-					$query = "body[data-owner=\"1\"] span.add a[href*=\"{anime_id}\"], body[data-owner=\"1\"] .add-edit-more a[href*=\"/{anime_id}/\"] { display: inline-block !important; } body[data-owner=\"1\"] .link[href^=\"/{type}/{anime_id}/\"] ~ .add-edit-more, body[data-owner=\"1\"] .progress-{anime_id}, body[data-owner=\"1\"] #tags-{anime_id} { display: inline-block !important; } body[data-owner=\"1\"] #tags-{anime_id} ~ * { display: table-cell !important; } body[data-owner=\"1\"] td > a[href*=\"/{anime_id}/\"] { pointer-events: auto; } body[data-owner=\"1\"] .data.image a[href*=\"/{anime_id}/\"] .image { visibility: visible !important; } body[data-owner=\"1\"] .data.title a[href*=\"/{anime_id}/\"], body[data-owner=\"1\"] .data.title.clearfix a[href*=\"/{anime_id}/\"].link.sort { font-size: 12px !important; } body[data-owner=\"1\"] .data.title a[href*=\"/{anime_id}/\"]:after, body[data-owner=\"1\"] .data.title.clearfix a[href*=\"/{anime_id}/\"].link.sort:after { content: \"\"; } body[data-owner=\"1\"] .data.image a[href*=\"/{anime_id}/\"], body[data-owner=\"1\"] .data.image a[href*=\"/{anime_id}/\"]:before, body[data-owner=\"1\"] .data.image a[href*=\"/{anime_id}/\"]:after, body[data-owner=\"1\"] .data.title [href^=\"/{anime_id}/\"]:before { background-image: inherit !important; }";
+					$query = "body[data-owner=\"1\"] span.add a[href*=\"{anime_id}\"], body[data-owner=\"1\"] .add-edit-more a[href*=\"/{anime_id}/\"] { display: inline-block !important; } body[data-owner=\"1\"] .link[href^=\"/{type}/{anime_id}/\"] ~ .add-edit-more, body[data-owner=\"1\"] .progress-{anime_id}, body[data-owner=\"1\"] #tags-{anime_id} { display: inline-block !important; } body[data-owner=\"1\"] tr.list-table-data > #tags-{anime_id} ~ td { display: table-cell !important; } body[data-owner=\"1\"] td > a[href*=\"/{anime_id}/\"] { pointer-events: auto; } body[data-owner=\"1\"] .data.image a[href*=\"/{anime_id}/\"] .image { visibility: visible !important; } body[data-owner=\"1\"] .data.title a[href*=\"/{anime_id}/\"], body[data-owner=\"1\"] .data.title.clearfix a[href*=\"/{anime_id}/\"].link.sort { font-size: 12px !important; } body[data-owner=\"1\"] .data.title a[href*=\"/{anime_id}/\"]:after, body[data-owner=\"1\"] .data.title.clearfix a[href*=\"/{anime_id}/\"].link.sort:after { content: \"\"; } body[data-owner=\"1\"] .data.image a[href*=\"/{anime_id}/\"], body[data-owner=\"1\"] .data.image a[href*=\"/{anime_id}/\"]:before, body[data-owner=\"1\"] .data.image a[href*=\"/{anime_id}/\"]:after, body[data-owner=\"1\"] .data.title [href^=\"/{anime_id}/\"]:before { background-image: inherit !important; }";
 				} else if (strtolower($type) == "manga") {
-					$query = "body[data-owner=\"1\"] span.add a[href*=\"{manga_id}\"], body[data-owner=\"1\"] .add-edit-more a[href*=\"/{manga_id}/\"] { display: inline-block !important; } body[data-owner=\"1\"] .link[href^=\"/{type}/{manga_id}/\"] ~ .add-edit-more, body[data-owner=\"1\"] .progress-{manga_id}, body[data-owner=\"1\"] #tags-{manga_id} { display: inline-block !important; } body[data-owner=\"1\"] #tags-{manga_id} ~ * { display: table-cell !important; } body[data-owner=\"1\"] td > a[href*=\"/{manga_id}/\"] { pointer-events: auto; } body[data-owner=\"1\"] .data.image a[href*=\"/{manga_id}/\"] .image { visibility: visible !important; } body[data-owner=\"1\"] .data.title a[href*=\"/{manga_id}/\"], body[data-owner=\"1\"] .data.title.clearfix a[href*=\"/{manga_id}/\"].link.sort { font-size: 12px !important; } body[data-owner=\"1\"] .data.title a[href*=\"/{manga_id}/\"]:after, body[data-owner=\"1\"] .data.title.clearfix a[href*=\"/{manga_id}/\"].link.sort:after { content: \"\"; } body[data-owner=\"1\"] .data.image a[href*=\"/{manga_id}/\"], body[data-owner=\"1\"] .data.image a[href*=\"/{manga_id}/\"]:before, body[data-owner=\"1\"] .data.image a[href*=\"/{manga_id}/\"]:after, body[data-owner=\"1\"] .data.title [href^=\"/{manga_id}/\"]:before { background-image: inherit !important; }";
+					$query = "body[data-owner=\"1\"] span.add a[href*=\"{manga_id}\"], body[data-owner=\"1\"] .add-edit-more a[href*=\"/{manga_id}/\"] { display: inline-block !important; } body[data-owner=\"1\"] .link[href^=\"/{type}/{manga_id}/\"] ~ .add-edit-more, body[data-owner=\"1\"] .progress-{manga_id}, body[data-owner=\"1\"] #tags-{manga_id} { display: inline-block !important; } body[data-owner=\"1\"] tr.list-table-data > #tags-{manga_id} ~ td { display: table-cell !important; } body[data-owner=\"1\"] td > a[href*=\"/{manga_id}/\"] { pointer-events: auto; } body[data-owner=\"1\"] .data.image a[href*=\"/{manga_id}/\"] .image { visibility: visible !important; } body[data-owner=\"1\"] .data.title a[href*=\"/{manga_id}/\"], body[data-owner=\"1\"] .data.title.clearfix a[href*=\"/{manga_id}/\"].link.sort { font-size: 12px !important; } body[data-owner=\"1\"] .data.title a[href*=\"/{manga_id}/\"]:after, body[data-owner=\"1\"] .data.title.clearfix a[href*=\"/{manga_id}/\"].link.sort:after { content: \"\"; } body[data-owner=\"1\"] .data.image a[href*=\"/{manga_id}/\"], body[data-owner=\"1\"] .data.image a[href*=\"/{manga_id}/\"]:before, body[data-owner=\"1\"] .data.image a[href*=\"/{manga_id}/\"]:after, body[data-owner=\"1\"] .data.title [href^=\"/{manga_id}/\"]:before { background-image: inherit !important; }";
 				}
 			}
 			if (strtolower($querywas) == "synopsis") {
@@ -1006,7 +911,7 @@ file_put_contents($reverseCoverFilePath, $reverseCoverJson, FILE_USE_INCLUDE_PAT
 			if ($decodedResult['status'] == 200) {
 				$timestamp = date('Y-m-d\TH:i:s.u\Z');
 				$result = "/* Accessed  " . $timestamp . " */ \r" . $result;
-				$result = "/* User: " . $user . " - " . $type . ", query: " . str_replace('*/', '*[DEL]/', $querywas) . " */ \r" . $result;
+				$result = "/* User: " . $user . " - " . $type . ", query: " . str_replace('*/', '*[DEL]/', $query) . " */ \r" . $result;
 				file_put_contents($filePath, $result, FILE_USE_INCLUDE_PATH);
 				print_r($result);
 			} else {
@@ -1020,25 +925,25 @@ file_put_contents($reverseCoverFilePath, $reverseCoverJson, FILE_USE_INCLUDE_PAT
 			}
 			$type = "anime";
 			}
-			if (strtolower($querywas) == "hidehentai" || strtolower($querywas) == "hidegenre") {
+			if (strtolower($querywas) == "hidehentai" || strtolower($querywas) == "hidegenre" || str_contains(strtolower($querywas), "hidehentai")) {
 				if (strtolower($type) == "anime") {
-					$query = "body[data-work=\"anime\"] span.add a[href*=\"/{anime_id}/\"], body[data-work=\"anime\"] .add-edit-more a[href*=\"/{anime_id}/\"], body[data-work=\"anime\"] .link[href^=\"/anime/{anime_id}/\"] ~ .add-edit-more, body[data-work=\"anime\"] .progress-{anime_id}, body[data-work=\"anime\"] #tags-{anime_id} { display: none !important; } body[data-work=\"anime\"] #tags-{anime_id} ~ * { display: none !important; } body[data-work=\"anime\"] td > a[href*=\"/{anime_id}/\"] { pointer-events: none; } body[data-work=\"anime\"] .data.image a[href*=\"/{anime_id}/\"] .image { visibility: hidden !important; } body[data-work=\"anime\"] .data.title a[href*=\"/{anime_id}/\"], body[data-work=\"anime\"] .data.title.clearfix a[href*=\"/{anime_id}/\"].link.sort { font-size: 0 !important; } body[data-work=\"anime\"] .data.title a[href*=\"/{anime_id}/\"]:after, body[data-work=\"anime\"] .data.title.clearfix a[href*=\"/{anime_id}/\"].link.sort:after { font-size: 13px; content: \"Unavailable\"; } body[data-work=\"anime\"] .data.image a[href*=\"/{anime_id}/\"], body[data-work=\"anime\"] .data.image a[href*=\"/{anime_id}/\"]:before, body[data-work=\"anime\"] .data.image a[href*=\"/{anime_id}/\"]:after, body[data-work=\"anime\"] .data.title [href^=\"/{anime_id}/\"]:before { background-image: url(https://shaggyze.github.io/Themes/unavailable.png) !important; border: 2px solid #fff; } .list-table .list-table-data:hover .data.title .link[href^=\"/anime/{anime_id}/\"]::before { content:\"unavailable\" !important; }";
+					$query = "body[data-work=\"{type}\"] span.add a[href*=\"/{anime_id}/\"], body[data-work=\"{type}\"] .add-edit-more a[href*=\"/{anime_id}/\"], body[data-work=\"{type}\"] .link[href^=\"/{type}/{anime_id}/\"] ~ .add-edit-more, body[data-work=\"{type}\"] .progress-{anime_id}, body[data-work=\"{type}\"] #tags-{anime_id} { display: none !important; } body[data-work=\"{type}\"] tr.list-table-data > #tags-{anime_id} ~ td { display: none !important; } body[data-work=\"{type}\"] td > a[href*=\"/{anime_id}/\"] { pointer-events: none; } body[data-work=\"{type}\"] .data.image a[href*=\"/{anime_id}/\"] .image { visibility: hidden !important; } body[data-work=\"{type}\"] .data.title a[href*=\"/{anime_id}/\"], body[data-work=\"{type}\"] .data.title.clearfix a[href*=\"/{anime_id}/\"].link.sort { font-size: 0 !important; } body[data-work=\"{type}\"] .data.title a[href*=\"/{anime_id}/\"]:after, body[data-work=\"{type}\"] .data.title.clearfix a[href*=\"/{anime_id}/\"].link.sort:after { font-size: 13px; content: \"Unavailable\"; } body[data-work=\"{type}\"] .data.image a[href*=\"/{anime_id}/\"], body[data-work=\"{type}\"] .data.image a[href*=\"/{anime_id}/\"]:before, body[data-work=\"{type}\"] .data.image a[href*=\"/{anime_id}/\"]:after, body[data-work=\"{type}\"] .data.title [href^=\"/{anime_id}/\"]:before { background-image: url(https://shaggyze.github.io/Themes/unavailable.png) !important; border: 2px solid #fff; } .list-table .list-table-data:hover .data.title .link[href^=\"/{type}/{anime_id}/\"]::before { content:\"unavailable\" !important; }";
 				} else if (strtolower($type) == "manga") {
-					$query = "body[data-work=\"manga\"] span.add a[href*=\"/{manga_id}/\"], body[data-work=\"manga\"] .add-edit-more a[href*=\"/{manga_id}/\"], body[data-work=\"manga\"] .link[href^=\"/manga/{manga_id}/\"] ~ .add-edit-more, body[data-work=\"manga\"] .progress-{manga_id}, body[data-work=\"manga\"] #tags-{manga_id} { display: none !important; } body[data-work=\"manga\"] #tags-{manga_id} ~ * { display: none !important; } body[data-work=\"manga\"] td > a[href*=\"/{manga_id}/\"] { pointer-events: none; } body[data-work=\"manga\"] .data.image a[href*=\"/{manga_id}/\"] .image { visibility: hidden !important; } body[data-work=\"manga\"] .data.title a[href*=\"/{manga_id}/\"], body[data-work=\"manga\"] .data.title.clearfix a[href*=\"/{manga_id}/\"].link.sort { font-size: 0 !important; } body[data-work=\"manga\"] .data.title a[href*=\"/{manga_id}/\"]:after, body[data-work=\"manga\"] .data.title.clearfix a[href*=\"/{manga_id}/\"].link.sort:after { font-size: 13px; content: \"Unavailable\"; } body[data-work=\"manga\"] .data.image a[href*=\"/{manga_id}/\"], body[data-work=\"manga\"] .data.image a[href*=\"/{manga_id}/\"]:before, body[data-work=\"manga\"] .data.image a[href*=\"/{manga_id}/\"]:after, body[data-work=\"manga\"] .data.title [href^=\"/{manga_id}/\"]:before { background-image: url(https://shaggyze.github.io/Themes/unavailable.png) !important; border: 2px solid #fff; } .list-table .list-table-data:hover .data.title .link[href^=\"/manga/{manga_id}/\"]::before { content:\"unavailable\" !important; }";
+					$query = "body[data-work=\"{type}\"] span.add a[href*=\"/{manga_id}/\"], body[data-work=\"{type}\"] .add-edit-more a[href*=\"/{manga_id}/\"], body[data-work=\"{type}\"] .link[href^=\"/{type}/{manga_id}/\"] ~ .add-edit-more, body[data-work=\"{type}\"] .progress-{manga_id}, body[data-work=\"{type}\"] #tags-{manga_id} { display: none !important; } body[data-work=\"{type}\"] tr.list-table-data > #tags-{manga_id} ~ td { display: none !important; } body[data-work=\"{type}\"] td > a[href*=\"/{manga_id}/\"] { pointer-events: none; } body[data-work=\"{type}\"] .data.image a[href*=\"/{manga_id}/\"] .image { visibility: hidden !important; } body[data-work=\"{type}\"] .data.title a[href*=\"/{manga_id}/\"], body[data-work=\"{type}\"] .data.title.clearfix a[href*=\"/{manga_id}/\"].link.sort { font-size: 0 !important; } body[data-work=\"{type}\"] .data.title a[href*=\"/{manga_id}/\"]:after, body[data-work=\"{type}\"] .data.title.clearfix a[href*=\"/{manga_id}/\"].link.sort:after { font-size: 13px; content: \"Unavailable\"; } body[data-work=\"{type}\"] .data.image a[href*=\"/{manga_id}/\"], body[data-work=\"{type}\"] .data.image a[href*=\"/{manga_id}/\"]:before, body[data-work=\"{type}\"] .data.image a[href*=\"/{manga_id}/\"]:after, body[data-work=\"{type}\"] .data.title [href^=\"/{manga_id}/\"]:before { background-image: url(https://shaggyze.github.io/Themes/unavailable.png) !important; border: 2px solid #fff; } .list-table .list-table-data:hover .data.title .link[href^=\"/{type}/{manga_id}/\"]::before { content:\"unavailable\" !important; }";
 				}
 				$query = $query;
-			} else if (strtolower($querywas) == "showownerhentai" || strtolower($querywas) == "showownergenre") {
+			} else if (strtolower($querywas) == "showownerhentai" || strtolower($querywas) == "showownergenre" || str_contains(strtolower($querywas), "showownerhentai")) {
 				if (strtolower($type) == "anime") {
-					$query = "body[data-owner=\"1\"] span.add a[href*=\"{anime_id}\"], body[data-owner=\"1\"] .add-edit-more a[href*=\"/{anime_id}/\"] { display: inline-block !important; } body[data-owner=\"1\"] .link[href^=\"/{type}/{anime_id}/\"] ~ .add-edit-more, body[data-owner=\"1\"] .progress-{anime_id}, body[data-owner=\"1\"] #tags-{anime_id} { display: inline-block !important; } body[data-owner=\"1\"] #tags-{anime_id} ~ * { display: table-cell !important; } body[data-owner=\"1\"] td > a[href*=\"/{anime_id}/\"] { pointer-events: auto; } body[data-owner=\"1\"] .data.image a[href*=\"/{anime_id}/\"] .image { visibility: visible !important; } body[data-owner=\"1\"] .data.title a[href*=\"/{anime_id}/\"], body[data-owner=\"1\"] .data.title.clearfix a[href*=\"/{anime_id}/\"].link.sort { font-size: 12px !important; } body[data-owner=\"1\"] .data.title a[href*=\"/{anime_id}/\"]:after, body[data-owner=\"1\"] .data.title.clearfix a[href*=\"/{anime_id}/\"].link.sort:after { content: \"\"; } body[data-owner=\"1\"] .data.image a[href*=\"/{anime_id}/\"], body[data-owner=\"1\"] .data.image a[href*=\"/{anime_id}/\"]:before, body[data-owner=\"1\"] .data.image a[href*=\"/{anime_id}/\"]:after, body[data-owner=\"1\"] .data.title [href^=\"/{anime_id}/\"]:before { background-image: inherit !important; }";
+					$query = "body[data-owner=\"1\"] span.add a[href*=\"{anime_id}\"], body[data-owner=\"1\"] .add-edit-more a[href*=\"/{anime_id}/\"] { display: inline-block !important; } body[data-owner=\"1\"] .link[href^=\"/{type}/{anime_id}/\"] ~ .add-edit-more, body[data-owner=\"1\"] .progress-{anime_id}, body[data-owner=\"1\"] #tags-{anime_id} { display: inline-block !important; } body[data-owner=\"1\"] tr.list-table-data > #tags-{anime_id} ~ td { display: table-cell !important; } body[data-owner=\"1\"] td > a[href*=\"/{anime_id}/\"] { pointer-events: auto; } body[data-owner=\"1\"] .data.image a[href*=\"/{anime_id}/\"] .image { visibility: visible !important; } body[data-owner=\"1\"] .data.title a[href*=\"/{anime_id}/\"], body[data-owner=\"1\"] .data.title.clearfix a[href*=\"/{anime_id}/\"].link.sort { font-size: 12px !important; } body[data-owner=\"1\"] .data.title a[href*=\"/{anime_id}/\"]:after, body[data-owner=\"1\"] .data.title.clearfix a[href*=\"/{anime_id}/\"].link.sort:after { content: \"\"; } body[data-owner=\"1\"] .data.image a[href*=\"/{anime_id}/\"], body[data-owner=\"1\"] .data.image a[href*=\"/{anime_id}/\"]:before, body[data-owner=\"1\"] .data.image a[href*=\"/{anime_id}/\"]:after, body[data-owner=\"1\"] .data.title [href^=\"/{anime_id}/\"]:before { background-image: inherit !important; }";
 				} else if (strtolower($type) == "manga") {
-					$query = "body[data-owner=\"1\"] span.add a[href*=\"{manga_id}\"], body[data-owner=\"1\"] .add-edit-more a[href*=\"/{manga_id}/\"] { display: inline-block !important; } body[data-owner=\"1\"] .link[href^=\"/{type}/{manga_id}/\"] ~ .add-edit-more, body[data-owner=\"1\"] .progress-{manga_id}, body[data-owner=\"1\"] #tags-{manga_id} { display: inline-block !important; } body[data-owner=\"1\"] #tags-{manga_id} ~ * { display: table-cell !important; } body[data-owner=\"1\"] td > a[href*=\"/{manga_id}/\"] { pointer-events: auto; } body[data-owner=\"1\"] .data.image a[href*=\"/{manga_id}/\"] .image { visibility: visible !important; } body[data-owner=\"1\"] .data.title a[href*=\"/{manga_id}/\"], body[data-owner=\"1\"] .data.title.clearfix a[href*=\"/{manga_id}/\"].link.sort { font-size: 12px !important; } body[data-owner=\"1\"] .data.title a[href*=\"/{manga_id}/\"]:after, body[data-owner=\"1\"] .data.title.clearfix a[href*=\"/{manga_id}/\"].link.sort:after { content: \"\"; } body[data-owner=\"1\"] .data.image a[href*=\"/{manga_id}/\"], body[data-owner=\"1\"] .data.image a[href*=\"/{manga_id}/\"]:before, body[data-owner=\"1\"] .data.image a[href*=\"/{manga_id}/\"]:after, body[data-owner=\"1\"] .data.title [href^=\"/{manga_id}/\"]:before { background-image: inherit !important; }";
+					$query = "body[data-owner=\"1\"] span.add a[href*=\"{manga_id}\"], body[data-owner=\"1\"] .add-edit-more a[href*=\"/{manga_id}/\"] { display: inline-block !important; } body[data-owner=\"1\"] .link[href^=\"/{type}/{manga_id}/\"] ~ .add-edit-more, body[data-owner=\"1\"] .progress-{manga_id}, body[data-owner=\"1\"] #tags-{manga_id} { display: inline-block !important; } body[data-owner=\"1\"] tr.list-table-data > #tags-{manga_id} ~ td { display: table-cell !important; } body[data-owner=\"1\"] td > a[href*=\"/{manga_id}/\"] { pointer-events: auto; } body[data-owner=\"1\"] .data.image a[href*=\"/{manga_id}/\"] .image { visibility: visible !important; } body[data-owner=\"1\"] .data.title a[href*=\"/{manga_id}/\"], body[data-owner=\"1\"] .data.title.clearfix a[href*=\"/{manga_id}/\"].link.sort { font-size: 12px !important; } body[data-owner=\"1\"] .data.title a[href*=\"/{manga_id}/\"]:after, body[data-owner=\"1\"] .data.title.clearfix a[href*=\"/{manga_id}/\"].link.sort:after { content: \"\"; } body[data-owner=\"1\"] .data.image a[href*=\"/{manga_id}/\"], body[data-owner=\"1\"] .data.image a[href*=\"/{manga_id}/\"]:before, body[data-owner=\"1\"] .data.image a[href*=\"/{manga_id}/\"]:after, body[data-owner=\"1\"] .data.title [href^=\"/{manga_id}/\"]:before { background-image: inherit !important; }";
 				}
 			}
 			if (strtolower($querywas) == "synopsis") {
 				if (strtolower($type) == "anime") {
-					$query = 'body[data-work="' . $type . '"] #tags-{anime_id}:after {content: \'{synopsis}\';}';
+					$query = 'body[data-work=\"{type}\"] #tags-{anime_id}:after {content: \'{synopsis}\';}';
 				} else if (strtolower($type) == "manga") {	
-					$query = 'body[data-work="' . $type . '"] #tags-{manga_id}:after {content: \'{synopsis}\';}';
+					$query = 'body[data-work=\"{type}\"] #tags-{manga_id}:after {content: \'{synopsis}\';}';
 				}
 			}
             $result = $myMalScraper->getUserCSS($user, $type, $query, $status, $genre);
@@ -1066,7 +971,7 @@ file_put_contents($reverseCoverFilePath, $reverseCoverJson, FILE_USE_INCLUDE_PAT
 			if ($decodedResult['status'] == 200) {
 				$timestamp = date('Y-m-d\TH:i:s.u\Z');
 				$result = "/* Accessed  " . $timestamp . " */ \r" . $result;
-				$result = "/* User: " . $user . " - " . $type . ", query: " . str_replace('*/', '*[DEL]/', $querywas) . " */ \r" . $result;
+				$result = "/* User: " . $user . " - " . $type . ", query: " . str_replace('*/', '*[DEL]/', $query) . " */ \r" . $result;
 				file_put_contents($filePath, $result, FILE_USE_INCLUDE_PATH);
 				print_r($result);
 			} else {
@@ -1079,8 +984,6 @@ file_put_contents($reverseCoverFilePath, $reverseCoverJson, FILE_USE_INCLUDE_PAT
 				}
 			}
 
-//$scriptPath = '/home/shagzgjm/public_html/scripts/visit_url.php'; // Replace with your script path
-//clearCronJobs($scriptPath);
 			visit_url("https://shaggyze.website/msa/usercss", ['u' => trim($user), 't' => $type, 'st' => $status, 'q' => $query, 'g' => $genre], $query);
 		} else {
             print_r(paramError('2'));
@@ -1090,19 +993,28 @@ file_put_contents($reverseCoverFilePath, $reverseCoverJson, FILE_USE_INCLUDE_PAT
     case 'usercover':
         if ($user) {
             header('Content-Type: text/css');
-            $type = $type ? $type : 'anime';
+
+            $type = in_array(strtolower($type ?? ''), ['anime', 'manga', 'all']) ? strtolower($type ?? '') : 'anime';
+			//$type = $type ? $type : 'anime';
             $genre = $genre ? $genre : 0;
 			$order = $order ? $order : 0;
             $query = $query ? $query : 'dataimagelinkbefore';
-
 			if (strlen($user) >= 17 || strlen($user) == 1) {
 				print_r(paramError('3'));
 				break;
 			}
 			if (strtolower($type) == ":type:") { $type = "all"; }
 			if (strtolower($query) == ":preset:") { $query = "dataimagelinkbefore"; }
-			if (strtolower($user) == "all" & strtolower($type) == "all" & strtolower($query) == "more") { $type = "anime"; }
-			if (strtolower($user) == "all" || strtolower($user) == "username") {
+			if (strtolower($type) == "all" & ($query == "more" || str_contains(strtolower($query), 'more'))) { 
+				if (str_contains(strtolower($query), 'manga')) {
+					$type = "manga";
+					$query = str_replace('anime', 'manga', strtolower($query));
+				} else {
+					$type = "anime";
+					$query = str_replace('manga', 'anime', strtolower($query));
+				}
+			}
+			if (strtolower($user) == "all" || strtolower($user) == "username" || strtolower($user) == "usernameq=body") {
 				$user = "_All_";
 			}
 			$typewas = $type;
@@ -1111,6 +1023,12 @@ file_put_contents($reverseCoverFilePath, $reverseCoverJson, FILE_USE_INCLUDE_PAT
 				$typewas = "all";
 				$type = "manga";
 				$query = getPreset($query, $type);
+				$filePath = '../cache/' . $user . '_' . $type . '_' . hash('sha256', $query) . '_' . $genre . '_' . $order .'.css';
+				if (file_exists($filePath)) {
+					$file = file_get_contents($filePath, FILE_USE_INCLUDE_PATH);
+					print_r($file);
+					$printed = true;
+				}
 				$result = $myMalScraper->getUserCover($user, $type, $query, $genre, $order);
 				$decodedResult = json_decode($result, true);
 				$result = json_decode($result, true);
@@ -1126,13 +1044,12 @@ file_put_contents($reverseCoverFilePath, $reverseCoverJson, FILE_USE_INCLUDE_PAT
 				} elseif (strtolower($size) == "medium") {
 					$result = str_replace('l.jpg', '.jpg', $result);
 				}
-				$filePath = '../cache/' . $user . '_' . $type . '_' . hash('sha256', $query) . '_' . $genre . '_' . $order .'.css';
 				if ($decodedResult['status'] == 200) {
 					$timestamp = date('Y-m-d\TH:i:s.u\Z');
 					$result = "/* Accessed  " . $timestamp . " */ \r" . $result;
 					$result = "/* User: " . $user . " - " . $type . ", query: " . $querywas . " */ \r" . $result;
 					file_put_contents($filePath, $result, FILE_USE_INCLUDE_PATH);
-					print_r($result);
+					if ($printed == false) print_r($result);
 				} else {
 
 					if (file_exists($filePath)) {
@@ -1145,6 +1062,12 @@ file_put_contents($reverseCoverFilePath, $reverseCoverJson, FILE_USE_INCLUDE_PAT
 				$type = "anime";
 			}
 			$query = getPreset($querywas, $type);
+			$filePath = '../cache/' . $user . '_' . $type . '_' . hash('sha256', $query) . '_' . $genre . '_' . $order .'.css';
+			if (file_exists($filePath)) {
+				$file = file_get_contents($filePath, FILE_USE_INCLUDE_PATH);
+				print_r($file);
+				$printed2 = true;
+			}
             $result = $myMalScraper->getUserCover($user, $type, $query, $genre, $order);
 			$decodedResult = json_decode($result, true);
 			$result = json_decode($result, true);
@@ -1160,14 +1083,12 @@ file_put_contents($reverseCoverFilePath, $reverseCoverJson, FILE_USE_INCLUDE_PAT
 			} elseif (strtolower($size) == "medium") {
 				$result = str_replace('l.jpg', '.jpg', $result);
 			}
-			$filePath = '../cache/' . $user . '_' . $type . '_' . hash('sha256', $query) . '_' . $genre . '_' . $order .'.css';
-
 			if ($decodedResult['status'] == 200) {
 				$timestamp = date('Y-m-d\TH:i:s.u\Z');
 				$result = "/* Accessed  " . $timestamp . " */ \r" . $result;
+				$result = "/* User: " . $user . " - " . $type . ", query: " . $querywas . " */ \r" . $result;
 				file_put_contents($filePath, $result, FILE_USE_INCLUDE_PATH);
-			$result = "/* User: " . $user . " - " . $type . ", query: " . $querywas . " */ \r" . $result;
-				print_r($result);
+				if ($printed2 == false) print_r($result);
 			} else {
 
 				if (file_exists($filePath)) {
@@ -1184,21 +1105,22 @@ file_put_contents($reverseCoverFilePath, $reverseCoverJson, FILE_USE_INCLUDE_PAT
         }
         break;
 		
-// Secret ----------
+// Depriciated, but can still work ----------
     case 'auto-cover':
     case 'autocover':
         header('Content-Type: text/css');
 
-        $user_url = $_SERVER['HTTP_REFERER'];
-        $user_url = str_replace('https://myanimelist.net', '', $user_url);
+		$user_url = $_SERVER['HTTP_REFERER'] ?? 'https://myanimelist.net/animelist/_All_';
+		$path = parse_url($user_url, PHP_URL_PATH);
+		$path = str_replace('.css', '', $path);
+		if (preg_match("/\/(animelist|mangalist)\/(.*)/", $path, $matches)) {
+			$type = str_replace('list', '', $matches[1]);
+			$user = $matches[2];
+		} else {
+			$type = 'anime';
+			$user = '_All_';
+		}
 
-        preg_match("/\/.+(list)\//", $user_url, $user_type);
-        $type = str_replace(['/', 'list'], '', $user_type[0]);
-
-        $user_url = str_replace(['/animelist/', '/mangalist/'], '', $user_url);
-        $user_url = preg_replace('/\?+.+/', '', $user_url);
-
-        $user = $user_url;
         $type = $type ? $type : 'anime';
         $genre = $genre ? $genre : 0;
 		$order = $order ? $order : 0;
@@ -1207,7 +1129,9 @@ file_put_contents($reverseCoverFilePath, $reverseCoverJson, FILE_USE_INCLUDE_PAT
         $result = $myMalScraper->getUserCover($user, $type, $query, $genre, $order);
         $result = json_decode($result, true);
         $result = $result['data'];
-
+		$timestamp = date('Y-m-d\TH:i:s.u\Z');
+		$result = "/* Accessed  " . $timestamp . " */ \r" . $result;
+		$result = "/* User: " . $user . " - " . $type . ", query: " . $query . " */ \r" . $result;
         print_r($result);
         break;
     default:
